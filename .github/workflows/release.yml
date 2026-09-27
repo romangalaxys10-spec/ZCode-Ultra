@@ -84,22 +84,22 @@ jobs:
           ASSET=$(find pkg-asset -type f -name "zcode-ultra-linux-x64*" | head -1)
           # --- deb ---
           ROOT="pkg-root"
-          mkdir -p "$ROOT/usr/bin" "$ROOT/usr/share/doc/zcode-ultra"
+          mkdir -p "$ROOT/DEBIAN" "$ROOT/usr/bin" "$ROOT/usr/share/doc/zcode-ultra"
           install -m 0755 "$ASSET" "$ROOT/usr/bin/zcode-ultra"
           cp README.md LICENSE "$ROOT/usr/share/doc/zcode-ultra/"
-          cat > "$ROOT/DEBIAN/control" <<CONTROL
-          Package: zcode-ultra
-          Version: $VERSION_NUM
-          Section: utils
-          Priority: optional
-          Architecture: amd64
-          Maintainer: ZCode Ultra Contributors <noreply@github.com>
-          Description: Lean, multi-provider, bot-native coding agent harness
-           Terminal AI coding agent with tools, subagents, memory, MCP and
-           sandboxed execution, plus Discord and WhatsApp bots. Self-contained
-           binary - no Node.js required.
-          Homepage: https://github.com/romangalaxys10-spec/ZCode-Ultra
-          CONTROL
+          {
+            echo "Package: zcode-ultra"
+            echo "Version: $VERSION_NUM"
+            echo "Section: utils"
+            echo "Priority: optional"
+            echo "Architecture: amd64"
+            echo "Maintainer: ZCode Ultra Contributors <noreply@github.com>"
+            echo "Description: Lean, multi-provider, bot-native coding agent harness"
+            echo " Terminal AI coding agent with tools, subagents, memory, MCP and"
+            echo " sandboxed execution, plus Discord and WhatsApp bots. Self-contained"
+            echo " binary - no Node.js required."
+            echo "Homepage: https://github.com/romangalaxys10-spec/ZCode-Ultra"
+          } > "$ROOT/DEBIAN/control"
           mkdir -p packages
           dpkg-deb --build --root-owner-group "$ROOT" "packages/zcode-ultra_${VERSION_NUM}_amd64.deb"
           # --- rpm (alien converts the deb) ---
