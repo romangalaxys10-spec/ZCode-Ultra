@@ -20,11 +20,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: macos-latest, arch: arm64, target: aarch64-apple-darwin }
-          - { os: macos-latest, arch: x64, target: x86_64-apple-darwin }
-          - { os: ubuntu-latest, arch: x64, target: x86_64-unknown-linux-gnu }
-          - { os: ubuntu-latest, arch: arm64, target: aarch64-unknown-linux-gnu }
-          - { os: windows-latest, arch: x64, target: x86_64-pc-windows-msvc }
+          - { os: macos-latest, arch: arm64, target: bun-darwin-arm64 }
+          - { os: macos-latest, arch: x64, target: bun-darwin-x64 }
+          - { os: ubuntu-latest, arch: x64, target: bun-linux-x64 }
+          - { os: ubuntu-latest, arch: arm64, target: bun-linux-arm64 }
+          - { os: windows-latest, arch: x64, target: bun-windows-x64 }
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
