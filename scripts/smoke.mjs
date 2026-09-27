@@ -91,7 +91,10 @@ check("Glob tool", g.output.includes("src/hello.ts"), g.output);
 const gr = await reg.execute("Grep", { pattern: "HELLO", output_mode: "content" }, tools);
 check("Grep tool", gr.output.includes("src/hello.ts:2"), gr.output.slice(0, 80));
 
-const b = await reg.execute("Bash", { command: "node -e \"console.log('smoke-' + (20 + 3))\"" }, tools);
+// Use a script file: cmd.exe (Windows fallback shell) mangles inline
+// `node -e "…(20 + 3)…"` quotes/parentheses, making this check flaky.
+fs.writeFileSync(path.join(WS, "bash-check.js"), "console.log('smoke-' + (20 + 3));\n");
+const b = await reg.execute("Bash", { command: "node bash-check.js" }, tools);
 check("Bash tool", b.output.includes("smoke-23"), b.output);
 
 const ls = await reg.execute("LS", { path: "." }, tools);
