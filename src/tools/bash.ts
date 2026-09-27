@@ -10,6 +10,23 @@ import { str, num } from "./types.js";
 import { bashRisk, checkApproval, sandboxedExec, scrubSecrets } from "../safety/safety.js";
 import { truncate } from "../util.js";
 
+/**
+ * Shell selection: POSIX uses /bin/bash. Windows prefers Git Bash (ships
+ * with GitHub runners and Git for Windows), falling back to cmd.exe.
+ */
+async function shellForWindows(): Promise<{ file: string; args: string[] }> {
+  try {
+    const { execFileSync } = await import("node:child_process");
+    const bashPath = execFileSync("where.exe", ["bash.exe"], { encoding: "utf8", timeout: 5000 }).split(/\r?\n/)[0]?.trim();
+    if (bashPath && !bashPath.toLowerCase().includes("system32")) {
+      return { file: bashPath, args: ["-c"] };
+    }
+  } catch {
+    /* bash not found */
+  }
+  return { file: process.env.ComSpec ?? "cmd.exe", args: ["/d", "/s", "/c"] };
+}
+
 export const BashTool: ToolDef = {
   name: "Bash",
   description:
@@ -50,10 +67,12 @@ export const BashTool: ToolDef = {
       return finish(r.code, r.stdout, r.stderr, command);
     }
 
+    const shell = process.platform === "win32" ? await shellForWindows() : { file: "/bin/bash", args: ["-c"] };
+
     return new Promise<ToolResult>((resolve) => {
       execFile(
-        "/bin/bash",
-        ["-c", command],
+        shell.file,
+        [...shell.args, command],
         {
           cwd: ctx.workspace,
           timeout: timeoutMs,

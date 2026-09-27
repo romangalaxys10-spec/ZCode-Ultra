@@ -246,7 +246,7 @@ export const GlobTool: ToolDef = {
       .map((f) => ({ f, m: fs.statSync(f).mtimeMs }))
       .sort((a, b) => b.m - a.m)
       .slice(0, 300)
-      .map((x) => path.relative(ctx.workspace, x.f) || x.f);
+      .map((x) => (path.relative(ctx.workspace, x.f) || x.f).split(path.sep).join("/"));
     return { output: matches.join("\n") || "No files matched." };
   },
 };
@@ -303,14 +303,15 @@ export const GrepTool: ToolDef = {
         if (re.test(lines[i])) {
           fileCount++;
           if (mode === "content" && results.length < max) {
-            const rel = path.relative(ctx.workspace, f);
+            const rel = path.relative(ctx.workspace, f).split(path.sep).join("/");
             results.push(`${rel}:${i + 1}: ${truncate(lines[i].trim(), 240)}`);
           }
         }
       }
       if (fileCount > 0) {
-        if (mode === "files_with_matches") results.push(path.relative(ctx.workspace, f));
-        if (mode === "count") counts.push(`${path.relative(ctx.workspace, f)}: ${fileCount}`);
+        const relFile = path.relative(ctx.workspace, f).split(path.sep).join("/");
+        if (mode === "files_with_matches") results.push(relFile);
+        if (mode === "count") counts.push(`${relFile}: ${fileCount}`);
       }
     }
     const out = mode === "count" ? counts.join("\n") : results.join("\n");

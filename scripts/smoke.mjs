@@ -76,7 +76,7 @@ check("Glob tool", g.output.includes("src/hello.ts"), g.output);
 const gr = await reg.execute("Grep", { pattern: "HELLO", output_mode: "content" }, tools);
 check("Grep tool", gr.output.includes("src/hello.ts:2"), gr.output.slice(0, 80));
 
-const b = await reg.execute("Bash", { command: "echo smoke-$((20+3))" }, tools);
+const b = await reg.execute("Bash", { command: "node -e \"console.log('smoke-' + (20 + 3))\"" }, tools);
 check("Bash tool", b.output.includes("smoke-23"), b.output);
 
 const ls = await reg.execute("LS", { path: "." }, tools);
