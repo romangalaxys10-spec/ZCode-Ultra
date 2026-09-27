@@ -16,7 +16,7 @@ import type { ToolRegistry, ToolContext } from "../tools/registry.js";
 import { createDefaultRegistry } from "../tools/registry.js";
 import { McpHub, mcpToolDefs } from "../mcp/client.js";
 import { buildSystemPrompt, buildTurnContext } from "./context.js";
-import { shouldCompact, compactionPrompt } from "./compaction.js";
+import { shouldCompact, compactionPrompt, compilePreserve } from "./compaction.js";
 import { Session } from "./session.js";
 import { loadSkills, selectSkills, renderSkills } from "../skills/skills.js";
 import { memoryRecall, memoryAppend } from "../memory/memory.js";
@@ -24,6 +24,12 @@ import { makeSafety, scrubSecrets } from "../safety/safety.js";
 import type { ApprovalHandler } from "../safety/safety.js";
 import type { Config } from "../config/config.js";
 import { estimateTokens, truncate } from "../util.js";
+import { createCheckpoint, restoreCheckpoint, listCheckpoints } from "./checkpoints.js";
+import { lintFile } from "./edit-guard.js";
+import { autoCommit } from "./git.js";
+import { stopAllTasks } from "../tools/bg-tools.js";
+import { estimateCost, type UsageMap } from "./cost.js";
+import { BUILTIN_PROVIDERS } from "../config/config.js";
 
 export interface AgentEvent {
   type:
@@ -35,6 +41,7 @@ export interface AgentEvent {
     | "compaction"
     | "plan"
     | "error"
+    | "note"
     | "done";
   turn?: number;
   text?: string;
@@ -50,6 +57,10 @@ export interface RunResult {
   turns: number;
   stopped: "end_turn" | "max_turns" | "aborted" | "error";
   totalTokens: number;
+  /** estimated USD cost of the whole session so far (provider cost table) */
+  cost: number;
+  /** files the agent modified during this run */
+  filesTouched: string[];
 }
 
 export interface AgentOptions {
@@ -62,6 +73,8 @@ export interface AgentOptions {
   signal?: AbortSignal;
   /** plain text answer only — used by subagents and exec mode */
   quiet?: boolean;
+  /** role routing override (worker subagents inherit their role model) */
+  modelOverride?: string;
 }
 
 export class Agent {
@@ -70,10 +83,48 @@ export class Agent {
   private todos: Array<{ id: string; content: string; status: string }> = [];
   private systemPrompt: string;
   private streamedAnyText = false;
+  /** files modified during the current run (Aider auto-commit set) */
+  private dirtyFiles = new Set<string>();
+  /** checkpoint id created before the first mutation of the current run */
+  private runCheckpoint: string | null = null;
 
   constructor(public opts: AgentOptions) {
     this.registry = createDefaultRegistry();
     this.systemPrompt = "";
+  }
+
+  /** Primary model for a role: overrides fall back to the default model. */
+  private primaryFor(kind: "main" | "plan" | "subagent" | "summarizer"): string {
+    const cfg = this.opts.cfg;
+    if (kind === "subagent") return this.opts.modelOverride || cfg.roles.worker || cfg.model;
+    if (kind === "plan") return this.opts.modelOverride || cfg.roles.planner || cfg.model;
+    if (kind === "summarizer") return cfg.roles.summarizer || cfg.model;
+    return this.opts.modelOverride || cfg.model;
+  }
+
+  private chainFor(kind: "main" | "plan" | "subagent" | "summarizer"): string[] {
+    const cfg = this.opts.cfg;
+    const primary = this.primaryFor(kind);
+    const chain = [primary, ...cfg.fallbackModels.filter((m) => m !== primary)];
+    return chain;
+  }
+
+  /** Build a cost table { providerId: {in,out} } from built-ins + user config. */
+  costTable(): Record<string, { in: number; out: number }> {
+    const table: Record<string, { in: number; out: number }> = {};
+    for (const [id, p] of Object.entries({ ...BUILTIN_PROVIDERS, ...this.opts.cfg.providers })) {
+      if (p.cost) table[id] = p.cost;
+    }
+    return table;
+  }
+
+  sessionCost(): number {
+    const usage: UsageMap = this.opts.session.meta.usage ?? {};
+    return estimateCost(usage, this.costTable());
+  }
+
+  checkpointId(): string | null {
+    return this.runCheckpoint;
   }
 
   private emit(ev: AgentEvent): void {
@@ -120,10 +171,11 @@ export class Agent {
 
   private makeToolContext(signal?: AbortSignal): ToolContext {
     const cfg = this.opts.cfg;
+    const workspace = this.opts.workspace;
     return {
-      workspace: this.opts.workspace,
+      workspace,
       cfg,
-      safety: makeSafety(cfg, this.opts.workspace, this.opts.approvalHandler ?? null),
+      safety: makeSafety(cfg, workspace, this.opts.approvalHandler ?? null),
       signal,
       onProgress: (line) => this.emit({ type: "toolStart", toolName: undefined, message: line }),
       services: {
@@ -134,6 +186,17 @@ export class Agent {
         },
         memoryAppend: async (note) => memoryAppend(note),
         memorySearch: async (query) => memoryRecall(query),
+        beforeFileWrite: (file) => {
+          if (cfg.checkpoints === false) return;
+          if (this.runCheckpoint) return; // one snapshot per run (restore-to-before-turn)
+          this.runCheckpoint = createCheckpoint(workspace, this.currentPromptLabel || "turn");
+          if (this.runCheckpoint) this.emit({ type: "note", message: `checkpoint ${this.runCheckpoint} created` });
+          void file;
+        },
+        afterFileWrite: (file) => (cfg.editGuard === false ? null : lintFile(file)),
+        markDirty: (file) => {
+          this.dirtyFiles.add(file.startsWith(workspace) ? file.slice(workspace.length + 1).replace(/\\/g, "/") : file);
+        },
       },
     };
   }
@@ -161,7 +224,7 @@ export class Agent {
     };
     const preset = presets[type] ?? presets.general!;
 
-    const subSession = new Session(this.opts.workspace, this.opts.cfg.model);
+    const subSession = new Session(this.opts.workspace, this.primaryFor("subagent"));
     const sub = new Agent({
       cfg: this.opts.cfg,
       workspace: this.opts.workspace,
@@ -169,6 +232,7 @@ export class Agent {
       approvalHandler: this.opts.approvalHandler,
       signal,
       quiet: true,
+      modelOverride: this.primaryFor("subagent"),
       onEvent: (ev) => {
         if (ev.type === "toolStart" && ev.message) this.emit({ type: "toolStart", message: `  [${type}] ${ev.message}` });
       },
@@ -192,6 +256,18 @@ export class Agent {
     return this.todos;
   }
 
+  /** Snapshot list for UI restore commands. */
+  checkpoints(): ReturnType<typeof listCheckpoints> {
+    return listCheckpoints(this.opts.workspace);
+  }
+
+  /** Restore a checkpoint (REPL /checkpoint command). */
+  restoreCheckpointById(id: string, deleteNewFiles: boolean): string {
+    return restoreCheckpoint(this.opts.workspace, id, { deleteNewFiles });
+  }
+
+  private currentPromptLabel = "";
+
   /** Execute the full agent loop for one user prompt. */
   async run(userPrompt: string, runOpts?: { maxTurns?: number }): Promise<RunResult> {
     const cfg = this.opts.cfg;
@@ -200,6 +276,10 @@ export class Agent {
     let turns = 0;
     let finalText = "";
     let stopped: RunResult["stopped"] = "end_turn";
+    this.dirtyFiles.clear();
+    this.runCheckpoint = null;
+    this.currentPromptLabel = userPrompt.replace(/\s+/g, " ").slice(0, 80);
+    const chain = this.chainFor(this.opts.planMode ? "plan" : "main");
 
     // Skill injection for this request
     const skills = this.skillsFor(userPrompt);
@@ -243,7 +323,6 @@ export class Agent {
         const todoCtx = buildTurnContext(this.todos);
         if (todoCtx) messages.push({ role: "user", content: todoCtx });
 
-        const chain = [cfg.model, ...cfg.fallbackModels];
         const planMode = Boolean(this.opts.planMode);
         const result = await routeCompletion(
           {
@@ -262,6 +341,7 @@ export class Agent {
         );
 
         this.opts.session.addTokens(result.usage.inputTokens + result.usage.outputTokens);
+        this.opts.session.addModelUsage(result.modelRef ?? this.primaryFor(this.opts.planMode ? "plan" : "main"), result.usage.inputTokens, result.usage.outputTokens);
 
         if (result.text) {
           finalText += (finalText && result.text ? "\n" : "") + result.text;
@@ -309,8 +389,24 @@ export class Agent {
       this.emit({ type: "error", message: (e as Error).message });
     }
 
+    // Aider pattern: attribute the turn's file changes as a git commit.
+    if (cfg.git.autoCommit && this.dirtyFiles.size > 0 && stopped !== "error" && !this.opts.planMode) {
+      const commit = await autoCommit(this.opts.workspace, [...this.dirtyFiles], this.currentPromptLabel, cfg.git.commitPrefix || "zcu");
+      this.emit({
+        type: "note",
+        message: commit.ok ? `git: ${commit.detail}` : `git auto-commit skipped: ${commit.detail}`,
+      });
+    }
+
     this.emit({ type: "done", message: finalText });
-    return { finalText, turns, stopped, totalTokens: this.opts.session.meta.totalTokens };
+    return {
+      finalText,
+      turns,
+      stopped,
+      totalTokens: this.opts.session.meta.totalTokens,
+      cost: this.sessionCost(),
+      filesTouched: [...this.dirtyFiles],
+    };
   }
 
   /** Bounded parallel pool: independent calls run concurrently, order preserved. */
@@ -378,20 +474,24 @@ export class Agent {
   async compact(): Promise<void> {
     const history = this.opts.session.history;
     if (history.length < 6) return;
-    const { summaryRequest, keep } = compactionPrompt(history, this.opts.cfg.compactKeepRecent);
+    const preserve = compilePreserve(this.opts.cfg.compactPreserve ?? []);
+    const { summaryRequest, keep } = compactionPrompt(history, this.opts.cfg.compactKeepRecent, preserve);
+    const chain = this.chainFor("summarizer");
     try {
       const result = await routeCompletion(
-        { cfg: this.opts.cfg, chain: [this.opts.cfg.model, ...this.opts.cfg.fallbackModels], retriesPerModel: 1 },
+        { cfg: this.opts.cfg, chain, retriesPerModel: 1 },
         {
           messages: [
             { role: "system", content: "You summarize agent transcripts. Be dense and factual. Preserve file paths and exact next steps." },
             { role: "user", content: summaryRequest },
           ],
           tools: [],
-          model: this.opts.cfg.model,
+          model: this.primaryFor("summarizer"),
           maxTokens: 1500,
         }
       );
+      this.opts.session.addTokens(result.usage.inputTokens + result.usage.outputTokens);
+      this.opts.session.addModelUsage(result.modelRef ?? this.primaryFor("summarizer"), result.usage.inputTokens, result.usage.outputTokens);
       const summary = `<conversation_summary>\n${result.text}\n</conversation_summary>\nContinue the task from "Next steps" in the summary.`;
       this.opts.session.replaceHistory(summary, keep);
       this.emit({ type: "compaction", message: `compacted: ${history.length} -> ${keep.length + 1} messages` });
@@ -407,6 +507,7 @@ export class Agent {
 
   shutdown(): void {
     this.mcpHub?.shutdown();
+    stopAllTasks();
     this.opts.session.persistMeta();
   }
 }

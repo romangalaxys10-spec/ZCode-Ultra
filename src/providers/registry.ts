@@ -35,6 +35,8 @@ export interface TurnResult {
   text: string;
   toolCalls: Array<{ id: string; name: string; arguments: Record<string, unknown>; rawArguments?: string }>;
   usage: Usage;
+  /** the "provider/model" ref that actually served this completion */
+  modelRef?: string;
 }
 
 export interface RouterOptions {
@@ -114,7 +116,8 @@ export async function routeCompletion(opts: RouterOptions, req: CompletionReques
   const errors: string[] = [];
   for (const ref of chain) {
     try {
-      return await streamOnce(opts, ref, req);
+      const result = await streamOnce(opts, ref, req);
+      return { ...result, modelRef: ref };
     } catch (e) {
       if (opts.signal?.aborted) throw e;
       const msg = `${ref}: ${(e as Error).message}`;

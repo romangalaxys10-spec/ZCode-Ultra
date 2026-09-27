@@ -3,7 +3,7 @@
 class ZcodeUltra < Formula
   desc "Lean, multi-provider, bot-native coding agent harness (CLI + Discord + WhatsApp)"
   homepage "https://github.com/romangalaxys10-spec/ZCode-Ultra"
-  version "1.0.0"
+  version "1.1.0"
   license "MIT"
 
   depends_on "node" => ">=20" if OS.mac?

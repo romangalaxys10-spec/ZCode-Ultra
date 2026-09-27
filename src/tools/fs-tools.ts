@@ -144,10 +144,19 @@ export const WriteTool: ToolDef = {
       filePath: file, risk: "medium",
     });
     if (!decision.approved) return { output: `Error: ${decision.reason}`, isError: true };
+    ctx.services.beforeFileWrite?.(file);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, content, "utf8");
+    ctx.services.markDirty?.(file);
     ctx.onProgress?.(`wrote ${file} (${content.length} bytes)`);
-    return { output: `Wrote ${content.length} bytes to ${file}` };
+    const lintErr = ctx.services.afterFileWrite?.(file) ?? null;
+    if (lintErr) {
+      return {
+        output: `File written, but the edit guard rejected it — fix this now:\n${lintErr}\nFile: ${file}`,
+        isError: true,
+      };
+    }
+    return { output: `Wrote ${content.length} bytes to ${file}${lintErr ? "" : " (syntax OK)"}` };
   },
 };
 
@@ -188,10 +197,19 @@ export const EditTool: ToolDef = {
       filePath: file, risk: "medium",
     });
     if (!decision.approved) return { output: `Error: ${decision.reason}`, isError: true };
+    ctx.services.beforeFileWrite?.(file);
     const updated = replaceAll ? content.split(oldStr).join(newStr) : content.replace(oldStr, newStr);
     fs.writeFileSync(file, updated, "utf8");
+    ctx.services.markDirty?.(file);
     ctx.onProgress?.(`edited ${file}`);
-    return { output: `Edited ${file}: ${replaceAll ? occurrences : 1} replacement(s) applied.` };
+    const lintErr = ctx.services.afterFileWrite?.(file) ?? null;
+    if (lintErr) {
+      return {
+        output: `Edit applied, but the edit guard rejected the result — fix this now (checkpoint exists, use /checkpoint to revert):\n${lintErr}\nFile: ${file}`,
+        isError: true,
+      };
+    }
+    return { output: `Edited ${file}: ${replaceAll ? occurrences : 1} replacement(s) applied (syntax OK).` };
   },
 };
 

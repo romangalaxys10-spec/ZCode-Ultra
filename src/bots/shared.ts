@@ -11,6 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Agent } from "../core/agent.js";
 import { Session } from "../core/session.js";
+import { loadCustomCommands, matchCommand } from "../core/custom-commands.js";
 import type { ApprovalRequest, ApprovalDecision } from "../safety/safety.js";
 import { chunkText, errMessage, truncate } from "../util.js";
 import { scrubSecrets } from "../safety/safety.js";
@@ -118,6 +119,12 @@ export class BotBrain {
     const abortController = new AbortController();
     this.aborts.set(req.chatKey, abortController);
 
+    // Custom slash commands work on chat platforms too (Gemini CLI pattern):
+    // "/review src/auth.ts" expands from .zcode-ultra/commands/review.md
+    let text = req.text;
+    const match = matchCommand(loadCustomCommands(this.workspace), text);
+    if (match) text = match.expanded;
+
     const agent = new Agent({
       cfg: this.cfg,
       workspace: this.workspace,
@@ -140,7 +147,7 @@ export class BotBrain {
 
     try {
       await agent.boot();
-      const result = await agent.run(req.text, {
+      const result = await agent.run(text, {
         maxTurns: req.maxTurns ?? this.cfg.maxTurns,
       });
       clearInterval(flushTimer);

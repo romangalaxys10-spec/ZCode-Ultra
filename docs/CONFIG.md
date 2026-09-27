@@ -70,6 +70,35 @@ JSON5-lite is accepted: `//` comments and trailing commas. Writes are atomic (tm
     "discordAllowUsers": [],          // empty => first user becomes owner
     "whatsappAllowNumbers": [],       // empty => open mode
     "requireMentionInGuilds": true
+  },
+
+  // ── v1.1 additions ──────────────────────────────────────────────
+
+  // role-based model routing (Goose lead/worker pattern; empty = use "model")
+  "roles": {
+    "planner": "openai/gpt-4.1",          // used while plan mode is active
+    "worker": "deepseek/deepseek-chat",   // used by Task-tool subagents
+    "summarizer": "deepseek/deepseek-chat" // used for compaction summaries
+  },
+
+  // Aider-style git integration
+  "git": {
+    "autoCommit": false,             // commit the files an agent turn touched
+    "commitPrefix": "zcu"            // /undo only ever reverts "zcu:*" commits
+  },
+
+  "checkpoints": true,                 // snapshot before each mutating turn (/checkpoint restore)
+  "editGuard": true,                   // syntax-check files after Write/Edit (SWE-agent ACI)
+  "contextFiles": true,                // load AGENTS.md / rules/*.md into the prompt
+
+  // OpenHands condenser preserve-list: tool results matching these regexes
+  // are kept verbatim during compaction
+  "compactPreserve": ["schema", "file_path", "Exit code: 0"],
+
+  // Aider-style watch mode
+  "watch": {
+    "triggers": ["AI:", "AI?", "ai:"],  // "// AI: do X" lines invoke the agent
+    "pollMs": 400
   }
 }
 ```
@@ -79,16 +108,27 @@ JSON5-lite is accepted: `//` comments and trailing commas. Writes are atomic (tm
 ```
 zcode-ultra                     interactive REPL
 zcode-ultra exec "..."          headless one-shot (exit 0 ok / 1 error / 2 max-turns)
+zcode-ultra watch               watch mode: "// AI:" comments invoke the agent
+zcode-ultra resume [id]         resume the latest (or given) session
+zcode-ultra undo                git-revert the last agent commit
 zcode-ultra bot discord         Discord bot
 zcode-ultra bot whatsapp        WhatsApp bot (add --cloud for the official API)
 zcode-ultra setup               guided wizard
 zcode-ultra doctor              environment checks
 zcode-ultra config list|get|set manage global config
-zcode-ultra sessions [id]       list / inspect JSONL sessions
+zcode-ultra sessions [id]       list / inspect JSONL sessions (with cost lines)
 zcode-ultra memory "note"       append a memory note
 ```
 
-Key REPL commands: `/model` `/mode` `/plan` `/compact` `/tokens` `/sessions` `/resume` `/tools` `/help`.
+Key REPL commands: `/model` `/mode` `/plan` `/compact` `/tokens` `/cost` `/undo` `/checkpoint [list|restore <id>]` `/sessions` `/resume` `/tools` `/help` — plus any custom command defined in `.zcode-ultra/commands/*.md`.
+
+## v1.1 feature notes
+
+- **Git auto-commit**: with `git.autoCommit`, each turn that modified files produces one commit `zcu: <prompt excerpt>` listing the files. `undo`/`/undo` performs `git reset --hard HEAD~1` only when HEAD is an agent commit and the tree is clean — human work is never undone.
+- **Checkpoints**: the first file mutation of a turn snapshots the workspace (text files ≤ 2 MB, ignores `node_modules`/`.git`/etc.) into `~/.zcode-ultra/checkpoints/<ws-hash>/`, deduplicated by sha256 and pruned to 30. `/checkpoint restore <id>` rewrites files to the snapshot; files created after the snapshot are removed with your confirmation by default.
+- **Edit guard**: `.js/.mjs/.cjs` → `node --check`; `.py` → `ast.parse`; `.json` → `JSON.parse`; `.ts/.tsx/.jsx` → a strings/comments-aware delimiter scanner. A failure returns a tool error with the diagnostic, so the model fixes it immediately.
+- **Cost table**: per-provider `cost: { in, out }` (USD per 1M tokens) drives `/cost` estimates; local providers default to $0.
+- **Background tasks**: `Bash(run_in_background=true)` returns a task id; `TaskOutput` polls, `TaskStop` kills; all tasks die with the process.
 
 ## Safety model
 
@@ -105,6 +145,22 @@ Key REPL commands: `/model` `/mode` `/plan` `/compact` `/tokens` `/sessions` `/r
 ~/.zcode-ultra/
 ├── config.json          global config
 ├── MEMORY.md            agent memory (one bullet per fact)
+├── commands/            global custom slash commands (*.md)
 ├── skills/              SKILL.md files (auto-loaded by trigger match)
+├── checkpoints/<ws>/    content-addressed pre-edit snapshots (sha256 blobs)
 └── sessions/<id>.jsonl  event-sourced session log (resume/replay)
 ```
+
+Workspace-level (project):
+
+```
+<workspace>/
+├── AGENTS.md            project rules (CLAUDE.md / GEMINI.md also honored)
+├── .zcode-ultra.json    project config overrides
+└── .zcode-ultra/
+    ├── rules/*.md       fine-grained rule modules
+    ├── commands/*.md    project custom slash commands
+    ├── skills/          project skills
+    └── bot-sessions.json chat -> session bindings
+```
+

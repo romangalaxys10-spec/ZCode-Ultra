@@ -8,6 +8,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { Agent, type AgentEvent, type RunResult } from "../core/agent.js";
 import { Session } from "../core/session.js";
+import { loadCustomCommands, matchCommand } from "../core/custom-commands.js";
+import { formatUsageBreakdown, formatUsageLine } from "../core/cost.js";
+import { undoLastAgentCommit } from "../core/git.js";
 import type { Config, PermissionMode } from "../config/config.js";
 import { MODE_INFO, type ApprovalRequest, type ApprovalDecision } from "../safety/safety.js";
 import { colors as C, Spinner, truncate, VERSION, errMessage } from "../util.js";
@@ -27,6 +30,10 @@ function printBanner(cfg: Config, workspace: string, planMode: boolean): void {
   console.log(`${C.dim("mode")}      ${planMode ? C.magenta("plan") : cfg.permissionMode}${C.dim(` — ${MODE_INFO[planMode ? "plan" : cfg.permissionMode]}`)}`);
   console.log(C.dim("type a request, /help for commands, Ctrl+C to abort/exit"));
   console.log();
+}
+
+function listCustomCommands(workspace: string): string[] {
+  return loadCustomCommands(workspace).map((c) => `/${c.name}`);
 }
 
 function renderTodos(runResult: RunResult, agent: Agent): void {
@@ -116,12 +123,16 @@ export async function runRepl(opts: ReplOptions): Promise<void> {
   /plan [request]           toggle plan mode (with request = one-shot plan)
   /compact                  force context compaction
   /tokens                   show context usage estimate
+  /cost                     show session token usage + estimated cost
+  /undo                     revert the last agent git commit (aider-style)
+  /checkpoint [list|restore <id>]   manage file checkpoints (pre-edit snapshots)
   /sessions                 list saved sessions
   /resume <id>              resume a saved session
   /save                     save session (already auto-saved) + show id
   /clear                    start a fresh session
   /tools                    list tools (including MCP)
-  /quit                     exit`);
+  /quit                     exit
+${listCustomCommands(workspace).length ? `Custom: ${listCustomCommands(workspace).join(" ")}` : "Custom: none yet — add .zcode-ultra/commands/<name>.md"}`);
         break;
       case "/model":
         if (arg) {
@@ -150,6 +161,30 @@ export async function runRepl(opts: ReplOptions): Promise<void> {
       case "/tokens":
         console.log(`context usage: ~${agent.contextUsage().toLocaleString()} tokens`);
         break;
+      case "/cost":
+        console.log(formatUsageBreakdown(opts.session.meta.usage ?? {}, agent.costTable()));
+        break;
+      case "/undo": {
+        const r = await undoLastAgentCommit(workspace, cfg.git.commitPrefix || "zcu");
+        console.log(r.ok ? C.green(r.detail) : C.yellow(r.detail));
+        break;
+      }
+      case "/checkpoint": {
+        const sub = (arg || "list").split(/\s+/);
+        if (sub[0] === "restore" && sub[1]) {
+          const report = agent.restoreCheckpointById(sub[1], true);
+          console.log(report.startsWith("Error") ? C.red(report) : C.green(report));
+        } else if (sub[0] === "list") {
+          const cps = agent.checkpoints();
+          if (cps.length === 0) console.log(C.dim("(no checkpoints yet — created automatically before the first file edit of each turn)"));
+          for (const cp of cps.slice(0, 10)) {
+            console.log(`  ${C.cyan(cp.id)}  ${cp.ts.slice(11, 19)}  ${cp.files} files  ${C.dim(truncate(cp.label, 50))}`);
+          }
+        } else {
+          console.log("usage: /checkpoint [list | restore <id>]");
+        }
+        break;
+      }
       case "/sessions": {
         const list = Session.list().slice(0, 10);
         for (const s of list) console.log(`  ${C.cyan(s.id)}  ${s.updatedAt.slice(0, 16).replace("T", " ")}  ${truncate(s.title, 60)}  ${C.dim(`${s.totalTokens} tok`)}`);
@@ -182,8 +217,15 @@ export async function runRepl(opts: ReplOptions): Promise<void> {
         agent.shutdown();
         process.exit(0);
         break;
-      default:
+      default: {
+        // custom commands (Gemini CLI / Claude Code pattern)
+        const match = matchCommand(loadCustomCommands(workspace), input);
+        if (match) {
+          await runTurn(match.expanded);
+          break;
+        }
         console.log(C.red(`unknown command ${cmd} — /help`));
+      }
     }
   }
 
@@ -225,6 +267,13 @@ export async function runRepl(opts: ReplOptions): Promise<void> {
         case "compaction":
           console.log(C.magenta(`⌁ ${ev.message}`));
           break;
+        case "note":
+          if (spinnerOn) {
+            spinnerOn = false;
+            process.stdout.write("\n");
+          }
+          console.log(C.dim(`  ♪ ${ev.message}`));
+          break;
         case "error":
           if (spinnerOn) {
             spinnerOn = false;
@@ -243,7 +292,8 @@ export async function runRepl(opts: ReplOptions): Promise<void> {
       if (!printedText && result.finalText) console.log(result.finalText);
       if (result.stopped === "max_turns") console.log(C.yellow(`(stopped: max turns ${result.turns})`));
       if (result.stopped === "aborted") console.log(C.yellow("(aborted)"));
-      console.log(C.dim(`\n[${result.turns} turn(s), ~${result.totalTokens.toLocaleString()} tok, session ${opts.session.id}]`));
+      console.log(C.dim(`\n[${result.turns} turn(s), ~${result.totalTokens.toLocaleString()} tok, ~$${result.cost.toFixed(4)}, session ${opts.session.id}]`));
+      if (result.filesTouched.length > 0) console.log(C.dim(`files: ${result.filesTouched.slice(0, 8).join(", ")}${result.filesTouched.length > 8 ? "+more" : ""}`));
       renderTodos(result, agent);
       opts.session.meta.title = truncate(prompt.replace(/\s+/g, " "), 80);
       opts.session.persistMeta();

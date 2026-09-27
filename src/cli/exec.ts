@@ -8,6 +8,7 @@ import { Session } from "../core/session.js";
 import { makeSafety } from "../safety/safety.js";
 import { VERSION, errMessage } from "../util.js";
 import type { Config } from "../config/config.js";
+import { formatUsageLine } from "../core/cost.js";
 
 export interface ExecOptions {
   cfg: Config;
@@ -61,6 +62,9 @@ export async function runExec(opts: ExecOptions): Promise<number> {
             stopped: result.stopped,
             turns: result.turns,
             tokens: result.totalTokens,
+            cost: Number(result.cost.toFixed(4)),
+            usageLine: formatUsageLine(session.meta.usage ?? {}, agent.costTable()),
+            filesTouched: result.filesTouched,
             sessionId: session.id,
             result: result.finalText,
           },
@@ -70,7 +74,10 @@ export async function runExec(opts: ExecOptions): Promise<number> {
       );
     } else {
       if (result.finalText && !agent.hadStreamedText()) console.log(result.finalText);
-      process.stderr.write(`\n---\n[${result.turns} turn(s), ~${result.totalTokens.toLocaleString()} tok, stopped: ${result.stopped}, session ${session.id}]\n`);
+      process.stderr.write(
+        `\n---\n[${result.turns} turn(s), ~${result.totalTokens.toLocaleString()} tok, ${formatUsageLine(session.meta.usage ?? {}, agent.costTable())}, stopped: ${result.stopped}, session ${session.id}]\n`
+      );
+      if (result.filesTouched.length > 0) process.stderr.write(`files: ${result.filesTouched.join(", ")}\n`);
     }
     agent.shutdown();
     if (result.stopped === "error") return 1;

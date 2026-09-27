@@ -16,7 +16,14 @@ const { loadConfig, BUILTIN_PROVIDERS } = await import("../dist/config/config.js
 const { Session } = await import("../dist/core/session.js");
 const { createDefaultRegistry } = await import("../dist/tools/registry.js");
 const { makeSafety, scrubSecrets, pathAllowed, bashRisk, checkApproval } = await import("../dist/safety/safety.js");
-const { estimateHistoryTokens, pruneToolResults } = await import("../dist/core/compaction.js");
+const { estimateHistoryTokens, pruneToolResults, compilePreserve } = await import("../dist/core/compaction.js");
+const { createCheckpoint, listCheckpoints, restoreCheckpoint } = await import("../dist/core/checkpoints.js");
+const { lintFile, balancedDelimiters } = await import("../dist/core/edit-guard.js");
+const { loadCustomCommands, matchCommand, expandCommand } = await import("../dist/core/custom-commands.js");
+const { loadContextFiles } = await import("../dist/core/context-files.js");
+const { addUsage, estimateCost, formatUsageLine } = await import("../dist/core/cost.js");
+const { gitInfo } = await import("../dist/core/git.js");
+const { startTask, getTask, stopAllTasks } = await import("../dist/tools/bg-tools.js");
 
 let passed = 0;
 let failed = 0;
@@ -49,16 +56,24 @@ check("session persist + resume", loaded !== null && loaded.history.length === 2
 const reg = createDefaultRegistry();
 let todos = [];
 let memories = [];
+let checkpointCalls = 0;
+let lintCalls = 0;
+let dirtyMarks = [];
 const tools = { cfg, workspace: WS, safety: makeSafety(cfg, WS, null), services: {
   spawnSubagent: async () => "subagent-ok",
   todoState: () => todos,
   setTodoState: (t) => { todos = t; },
   memoryAppend: async (n) => { memories.push(n); },
   memorySearch: async () => memories.join("\n"),
+  beforeFileWrite: () => { checkpointCalls++; },
+  afterFileWrite: (f) => { lintCalls++; return lintFile(f); },
+  markDirty: (f) => { dirtyMarks.push(f); },
 } };
 
 const w = await reg.execute("Write", { file_path: "src/hello.ts", content: "export function hello(name: string): string {\n  return `hello ${name}`;\n}\n" }, tools);
 check("Write tool", !w.isError, w.output);
+check("Write tool emits hooks (checkpoint/lint/dirty)", checkpointCalls === 1 && lintCalls === 1 && dirtyMarks.length === 1, `cp=${checkpointCalls} lint=${lintCalls} dirty=${dirtyMarks.length}`);
+check("edit guard: valid TS passes", w.output.includes("syntax OK"), w.output);
 
 const r = await reg.execute("Read", { file_path: "src/hello.ts" }, tools);
 check("Read tool (line numbers)", !r.isError && r.output.includes("1\texport function hello"), r.output.slice(0, 80));
@@ -91,6 +106,84 @@ check("Memory save+recall", !m.isError && m2.output.includes("smoke memory entry
 
 const task = await reg.execute("Task", { description: "test", prompt: "do nothing", subagent_type: "explore" }, tools);
 check("Task (subagent stub)", task.output === "subagent-ok", task.output);
+
+// --- edit guard (SWE-agent ACI) ---
+const badFile = path.join(WS, "broken.js");
+fs.writeFileSync(badFile, "function f( { return 1;\n");
+check("edit guard catches broken js", lintFile(badFile) !== null);
+const okFile = path.join(WS, "ok.js");
+fs.writeFileSync(okFile, "const x = 1; console.log(x);\n");
+check("edit guard passes valid js", lintFile(okFile) === null);
+check("balancedDelimiters unclosed", balancedDelimiters("function a() {\n  const b = [1, 2;\n") !== null);
+check("balancedDelimiters ok with strings", balancedDelimiters('const s = ")}{([<//>]" ; // )} ignore\nlet t = `template ${x}`;\n') === null);
+const badWrite = await reg.execute("Write", { file_path: "broken2.js", content: "if (x { \n" }, tools);
+check("Write reports edit-guard failure as tool error", badWrite.isError === true && badWrite.output.includes("edit guard"), badWrite.output.slice(0, 80));
+
+// --- checkpoints (Cline/Gemini pattern) ---
+fs.writeFileSync(path.join(WS, "cp-target.txt"), "version-1\n");
+const cpId = createCheckpoint(WS, "before edit test");
+check("checkpoint created", typeof cpId === "string" && cpId.startsWith("cp_"), String(cpId));
+fs.writeFileSync(path.join(WS, "cp-target.txt"), "version-2\n");
+fs.writeFileSync(path.join(WS, "cp-new.txt"), "created after\n");
+const cps = listCheckpoints(WS);
+check("checkpoint list", cps.length >= 1 && cps[0].id === cpId);
+const restoreReport = restoreCheckpoint(WS, cpId, { deleteNewFiles: false });
+check("checkpoint restore content", fs.readFileSync(path.join(WS, "cp-target.txt"), "utf8") === "version-1\n", restoreReport);
+check("checkpoint keeps new files by default", fs.existsSync(path.join(WS, "cp-new.txt")) && restoreReport.includes("created after"));
+
+// --- custom commands (Gemini/Claude Code pattern) ---
+const cmdsDir = path.join(WS, ".zcode-ultra", "commands");
+fs.mkdirSync(cmdsDir, { recursive: true });
+fs.writeFileSync(path.join(cmdsDir, "review.md"), "Review $ARGUMENTS for bugs. Be thorough.");
+const cmds = loadCustomCommands(WS);
+check("custom command discovered", cmds.some((c) => c.name === "review" && c.source === "workspace"));
+const matched = matchCommand(cmds, "/review src/auth.ts");
+check("custom command matched + expanded", matched !== null && matched.expanded.includes("src/auth.ts"), JSON.stringify(matched));
+check("non-command stays null", matchCommand(cmds, "/definitely-not-a-command") === null);
+check("expandCommand", expandCommand({ name: "x", prompt: "go $ARGUMENTS go", source: "global", file: "" }, "fast") === "go fast go");
+
+// --- context files (AGENTS.md pattern) ---
+fs.writeFileSync(path.join(WS, "AGENTS.md"), "# Project rules\n- Use pnpm, never npm");
+const ctx = loadContextFiles(WS);
+check("context files: AGENTS.md loaded", ctx.includes("Use pnpm, never npm"), ctx.slice(0, 120));
+fs.mkdirSync(path.join(WS, ".zcode-ultra", "rules"), { recursive: true });
+fs.writeFileSync(path.join(WS, ".zcode-ultra", "rules", "style.md"), "- Always use TypeScript strict");
+const ctx2 = loadContextFiles(WS);
+check("context files: rules dir loaded", ctx2.includes("TypeScript strict"));
+
+// --- cost tracking (Aider /cost pattern) ---
+const usageMap = {};
+addUsage(usageMap, "zai/glm-4.6", 1_000_000, 100_000);
+const cost = estimateCost(usageMap, { zai: { in: 0.6, out: 2.2 } });
+check("cost estimate", Math.abs(cost - (0.6 + 0.22)) < 1e-9, String(cost));
+check("formatUsageLine", formatUsageLine(usageMap, { zai: { in: 0.6, out: 2.2 } }).includes("1 request"));
+
+// --- background tasks (Claude Code pattern) ---
+const bgShell = process.platform === "win32"
+  ? { file: process.env.ComSpec ?? "cmd.exe", args: ["/d", "/s", "/c"] }
+  : { file: "/bin/bash", args: ["-c"] };
+const bgCmd = "node -e \"console.log('bg-smoke-77')\"";
+const bgTask = startTask(WS, bgCmd, bgShell.file, bgShell.args, 30_000);
+await new Promise((r) => setTimeout(r, 2500));
+const bgDone = getTask(bgTask.id);
+check("background task runs", bgDone && bgDone.status === "completed" && bgDone.stdout.includes("bg-smoke-77"), JSON.stringify({ status: bgDone?.status, out: bgDone?.stdout, err: bgDone?.stderr }));
+const bgLong = startTask(WS, "node -e \"setTimeout(()=>{},60000)\"", bgShell.file, bgShell.args, 30_000);
+check("background task registered", getTask(bgLong.id)?.status === "running");
+stopAllTasks();
+check("stopAllTasks kills", getTask(bgLong.id)?.status !== "running");
+
+// --- git integration (Aider pattern, graceful without repo) ---
+const gi = await gitInfo(WS);
+check("git integration degrades gracefully", gi.available === true && gi.isRepo === false, JSON.stringify(gi));
+
+// --- preserve lists (OpenHands condenser) ---
+const presRegexes = compilePreserve(["KEEP-ME-\\d+"]);
+const mixed = [
+  { role: "tool", content: "random noise result", toolCallId: "a" },
+  { role: "tool", content: "KEEP-ME-42 schema output", toolCallId: "b" },
+];
+const prunedPres = pruneToolResults(mixed, 0, presRegexes);
+check("preserve-list keeps matching", prunedPres[0].content.includes("[pruned") && prunedPres[1].content.includes("KEEP-ME-42"));
 
 // --- safety ---
 check("scrubSecrets", scrubSecrets("key ghp_abcdefghijklmnopqrstuvwxyz0123456789 done").includes("***REDACTED***"));

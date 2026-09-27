@@ -20,19 +20,26 @@ src/
 │   ├── anthropic.ts       native /v1/messages SSE client
 │   └── registry.ts        router: fallback chains, retries, accumulation
 ├── core/
-│   ├── session.ts         JSONL event store + resume + listing
+│   ├── session.ts         JSONL event store + resume + listing + usage ledger
 │   ├── context.ts         stable→volatile prompt tiers, repo map (Aider-lite)
-│   ├── compaction.ts      pressure-triggered, tool-result pruning first
+│   ├── context-files.ts   AGENTS.md/CLAUDE.md/GEMINI.md + rules/*.md injection
+│   ├── custom-commands.ts .zcode-ultra/commands/*.md → /name prompts
+│   ├── compaction.ts      pressure-triggered, tool-result pruning + preserve-lists
+│   ├── cost.ts            per-model usage ledger, USD estimates (Aider /cost)
+│   ├── checkpoints.ts     sha256-deduped pre-edit snapshots + restore (Cline)
+│   ├── edit-guard.ts      post-Write/Edit syntax lint (SWE-agent ACI)
+│   ├── git.ts             agent-attributed auto-commit + guarded /undo (Aider)
 │   └── agent.ts           THE LOOP
-├── tools/                 registry + 13 built-in tools
+├── tools/                 registry + 15 built-in tools (incl. bg-task pair)
 ├── subagents/             (in core/agent.ts: presets, isolation, 1-level cap)
 ├── mcp/client.ts          JSON-RPC 2.0 stdio MCP client (zero-dep)
 ├── memory/memory.ts       MEMORY.md + scored keyword recall
 ├── skills/skills.ts       SKILL.md frontmatter + trigger selection
 ├── safety/safety.ts       modes, approvals, allowlists, scrubbing, sandbox
 ├── ui/repl.ts             readline TUI, streaming, in-chat commands
-├── cli/exec.ts            headless mode (CI: exit codes 0/1/2)
+├── cli/exec.ts            headless mode (CI: exit codes 0/1/2, JSON + cost)
 ├── cli/setup.ts           interactive wizard
+├── cli/watch.ts           watch mode: AI-trigger comments (Aider)
 └── bots/
     ├── shared.ts          BotBrain: per-chat queues, block streaming,
     │                      session binding, approvals delegation

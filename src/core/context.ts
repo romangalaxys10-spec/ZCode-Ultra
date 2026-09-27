@@ -11,6 +11,7 @@ import { VERSION } from "../util.js";
 import type { Config, PermissionMode } from "../config/config.js";
 import { MODE_INFO } from "../safety/safety.js";
 import type { ToolRegistry } from "../tools/registry.js";
+import { loadContextFiles } from "./context-files.js";
 
 const SYMBOL_RE: Record<string, RegExp> = {
   ".ts": /^\s*(?:export\s+)?(?:async\s+)?(?:function|class|interface|type|const|enum)\s+([A-Za-z0-9_$]+)/,
@@ -132,6 +133,11 @@ const skillsSection = skills.length
   ? `## Skills\n${skills.join("\n\n")}`
   : "";
 
+const projectContext = opts.cfg.contextFiles === false ? "" : loadContextFiles(workspace);
+const contextSection = projectContext
+  ? `## Project context (AGENTS.md / rules files)\nThese are durable instructions from the repository. Follow them over your own defaults.\n${projectContext}`
+  : "";
+
 const environment = `## Environment
 - workspace: ${workspace}
 - platform: ${platform}
@@ -142,7 +148,7 @@ const environment = `## Environment
 ## Repo map (top-level files and symbols)
 ${repoMap || "(empty workspace)"}`;
 
-  return [identity, operating, toolPolicy, mode, memory, skillsSection, environment].filter(Boolean).join("\n\n");
+  return [identity, operating, toolPolicy, mode, memory, skillsSection, contextSection, environment].filter(Boolean).join("\n\n");
 }
 
 /** The volatile tail used between turns (cheap, cache-friendly: separate user-side block). */

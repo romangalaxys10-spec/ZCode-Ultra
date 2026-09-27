@@ -7,16 +7,31 @@ import type { ChatMessage } from "../providers/types.js";
 import { estimateTokens, truncate } from "../util.js";
 import type { Config } from "../config/config.js";
 
-/** Prune old tool results to a stub — the biggest context consumer. */
-export function pruneToolResults(messages: ChatMessage[], keepRecent: number): ChatMessage[] {
+/** Prune old tool results to a stub — the biggest context consumer.
+ *  Messages matching cfg.compactPreserve regexes (OpenHands condenser
+ *  preserve-list) are kept verbatim instead of being pruned. */
+export function pruneToolResults(messages: ChatMessage[], keepRecent: number, preserve: RegExp[] = []): ChatMessage[] {
   const cut = Math.max(0, messages.length - keepRecent);
   return messages.map((m, i) => {
     if (i < cut && m.role === "tool") {
       const original = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+      if (preserve.some((re) => re.test(original))) return m; // preserved verbatim
       return { ...m, content: `[pruned tool result: ${truncate(original, 80)}]` };
     }
     return m;
   });
+}
+
+export function compilePreserve(patterns: string[]): RegExp[] {
+  const out: RegExp[] = [];
+  for (const p of patterns) {
+    try {
+      out.push(new RegExp(p, "i"));
+    } catch {
+      /* skip invalid pattern */
+    }
+  }
+  return out;
 }
 
 export function estimateHistoryTokens(messages: ChatMessage[]): number {
@@ -44,10 +59,10 @@ export function shouldCompact(messages: ChatMessage[], cfg: Config): CompactDeci
 }
 
 /** Build the summarization request shown to the model when compacting. */
-export function compactionPrompt(history: ChatMessage[], keepRecent: number): { summaryRequest: string; keep: ChatMessage[] } {
+export function compactionPrompt(history: ChatMessage[], keepRecent: number, preserve: RegExp[] = []): { summaryRequest: string; keep: ChatMessage[] } {
   const keep = history.slice(-keepRecent);
   const toSummarize = history.slice(0, Math.max(0, history.length - keepRecent));
-  const pruned = pruneToolResults(toSummarize, 0);
+  const pruned = pruneToolResults(toSummarize, 0, preserve);
   const transcript = pruned
     .map((m) => {
       const role = m.role.toUpperCase();

@@ -86,6 +86,12 @@ async function run() {
     if (process.env.E2E_DEBUG) console.log("RAW:", JSON.stringify(json, null, 2));
     const okText = json.result?.includes("Task complete");
     const proofFile = fs.existsSync(path.join(WS, "e2e-proof.txt")) && fs.readFileSync(path.join(WS, "e2e-proof.txt"), "utf8").includes("e2e works");
+    const metaFile = path.join(process.env.ZCODE_ULTRA_HOME, "sessions", json.sessionId + ".meta.json");
+    let metaUsageOk = false;
+    try {
+      const meta = JSON.parse(fs.readFileSync(metaFile, "utf8"));
+      metaUsageOk = meta.usage && meta.usage["ollama/mock-e2e"] && meta.usage["ollama/mock-e2e"].requests === 2;
+    } catch { /* ignore */ }
     const checks = [
       [okText, `final text returned (${json.turns} turns)`],
       [proofFile, "Write tool executed with streamed/accumulated args"],
@@ -98,6 +104,9 @@ async function run() {
       [sawToolResultFeedback, "tool results fed back for second turn"],
       [json.ok === true, "exec ok flag"],
       [json.tokens > 0, `usage accounting (${json.tokens} tok)`],
+      [Array.isArray(json.filesTouched) && json.filesTouched.includes("e2e-proof.txt"), `filesTouched reported (${JSON.stringify(json.filesTouched)})`],
+      [typeof json.cost === "number", `cost field present (${json.cost})`],
+      [metaUsageOk, "per-model usage ledger persisted in session meta"],
     ];
     const sessions = fs.readdirSync(path.join(process.env.ZCODE_ULTRA_HOME, "sessions")).filter((f) => f.endsWith(".jsonl"));
     checks.forEach((c) => { if (c[1].startsWith("Bash tool executed")) c[0] = (() => {

@@ -7,6 +7,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { sessionsDir, ensureDir, nowIso, shortId } from "../util.js";
 import type { ChatMessage, ToolCall } from "../providers/types.js";
+import type { UsageMap, ModelUsage } from "./cost.js";
+import { emptyUsage } from "./cost.js";
 
 export type SessionEventKind =
   | "user"
@@ -36,6 +38,8 @@ export interface SessionMeta {
   title: string;
   model: string;
   totalTokens: number;
+  /** per-model usage ledger (Aider /cost pattern) */
+  usage?: UsageMap;
 }
 
 export class Session {
@@ -152,5 +156,14 @@ export class Session {
 
   addTokens(n: number): void {
     this.meta.totalTokens += n;
+  }
+
+  /** Record one completion's usage against its model (cost accounting). */
+  addModelUsage(modelRef: string, inputTokens: number, outputTokens: number): void {
+    this.meta.usage ??= {};
+    const u: ModelUsage = (this.meta.usage[modelRef] ??= emptyUsage());
+    u.inputTokens += inputTokens;
+    u.outputTokens += outputTokens;
+    u.requests += 1;
   }
 }

@@ -7,6 +7,7 @@ import { ReadTool, WriteTool, EditTool, LSTool, GlobTool, GrepTool } from "./fs-
 import { BashTool, NotebookEditTool } from "./bash.js";
 import { WebFetchTool, WebSearchTool } from "./web-tools.js";
 import { TodoWriteTool, TaskTool, MemoryTool } from "./coord-tools.js";
+import { TaskOutputTool, TaskStopTool } from "./bg-tools.js";
 import type { ToolSpec } from "../providers/types.js";
 
 export class ToolRegistry {
@@ -49,6 +50,7 @@ export function createDefaultRegistry(): ToolRegistry {
     BashTool, NotebookEditTool,
     WebFetchTool, WebSearchTool,
     TodoWriteTool, TaskTool, MemoryTool,
+    TaskOutputTool, TaskStopTool,
   ]) {
     reg.register(t);
   }

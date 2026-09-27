@@ -57,6 +57,17 @@ export interface BotGuardConfig {
   requireMentionInGuilds?: boolean;
 }
 
+/** Role-based model routing (Goose lead/worker + Roo modes pattern).
+ *  Empty string = use the default `model`. Refs use "provider/model" form. */
+export interface RoleRoutingConfig {
+  /** model used while plan mode is active (stronger reasoning model) */
+  planner?: string;
+  /** model used by Task-tool subagents (cheaper worker model) */
+  worker?: string;
+  /** model used for compaction summaries (cheap, fast) */
+  summarizer?: string;
+}
+
 export interface Config {
   /** default model in "provider/model" form */
   model: string;
@@ -103,6 +114,21 @@ export interface Config {
   /** parallel tool execution enabled */
   parallelTools: boolean;
   telemetry: boolean;
+  /** role-based model routing (planner/worker/summarizer) */
+  roles: RoleRoutingConfig;
+  /** Aider-style git integration: attribute every agent edit as a git commit */
+  git: { autoCommit: boolean; commitPrefix: string };
+  /** Cline/Gemini-style checkpoints: snapshot files before each write/edit */
+  checkpoints: boolean;
+  /** SWE-agent ACI edit guard: syntax-check files after Write/Edit */
+  editGuard: boolean;
+  /** hierarchical context files: AGENTS.md + .zcode-ultra/rules/*.md */
+  contextFiles: boolean;
+  /** compaction preserve-list (OpenHands condenser): regexes; matching
+   *  messages are kept verbatim instead of being pruned/summarized away */
+  compactPreserve: string[];
+  /** watch mode triggers: comment prefixes that invoke the agent */
+  watch: { triggers: string[]; pollMs: number };
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -142,6 +168,13 @@ export const DEFAULT_CONFIG: Config = {
   maxTurns: 60,
   parallelTools: true,
   telemetry: false,
+  roles: {},
+  git: { autoCommit: false, commitPrefix: "zcu" },
+  checkpoints: true,
+  editGuard: true,
+  contextFiles: true,
+  compactPreserve: [],
+  watch: { triggers: ["AI:", "AI?", "ai:"], pollMs: 400 },
 };
 
 /**

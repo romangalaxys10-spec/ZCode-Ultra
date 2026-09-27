@@ -29,6 +29,12 @@ export interface ToolContext {
     setTodoState: (todos: Array<{ id?: string; content: string; status: string }>) => void;
     memoryAppend: (note: string) => Promise<void>;
     memorySearch: (query: string) => Promise<string>;
+    /** checkpoint a file before it is mutated (Cline pattern); optional */
+    beforeFileWrite?: (file: string) => void;
+    /** syntax-lint a file after Write/Edit; returns error text or null (SWE-agent ACI) */
+    afterFileWrite?: (file: string) => string | null;
+    /** mark a file dirty for the turn-end git auto-commit (Aider pattern) */
+    markDirty?: (file: string) => void;
   };
 }
 

@@ -4,12 +4,15 @@
  *
  *   zcode-ultra                      interactive REPL (default)
  *   zcode-ultra exec "prompt"        headless one-shot run
+ *   zcode-ultra watch                watch mode: AI: comment triggers (aider)
+ *   zcode-ultra resume [id]          resume the latest (or given) session
  *   zcode-ultra bot discord          start the Discord bot
  *   zcode-ultra bot whatsapp         start the WhatsApp bot (baileys|cloud)
  *   zcode-ultra setup                guided provider + bot configuration
  *   zcode-ultra doctor               environment sanity check
  *   zcode-ultra config get|set|list  manage ~/.zcode-ultra/config.json
  *   zcode-ultra sessions [id]        list / inspect sessions
+ *   zcode-ultra undo                 revert the last agent git commit
  */
 import path from "node:path";
 import { loadConfig, saveGlobalConfig, resolveModelRef, DEFAULT_CONFIG, BUILTIN_PROVIDERS, configDirExample, type Config } from "./config/config.js";
@@ -19,13 +22,15 @@ import { runExec } from "./cli/exec.js";
 import { VERSION, colors as C, errMessage, dataHome, atomicWrite } from "./util.js";
 import { dockerAvailable, MODE_INFO } from "./safety/safety.js";
 import { memoryAppend } from "./memory/memory.js";
+import { undoLastAgentCommit } from "./core/git.js";
+import { formatUsageLine } from "./core/cost.js";
 
 interface Args {
   positional: string[];
   flags: Record<string, string | boolean>;
 }
 
-const BOOLEAN_FLAGS = new Set(["json", "plan", "yolo", "help", "version", "sandbox", "accept-edits", "no-open", "cloud"]);
+const BOOLEAN_FLAGS = new Set(["json", "plan", "yolo", "help", "version", "sandbox", "accept-edits", "no-open", "cloud", "no-strip"]);
 
 function parseArgs(argv: string[]): Args {
   const positional: string[] = [];
@@ -84,10 +89,13 @@ function help(): string {
 USAGE
   zcode-ultra [options]                 interactive REPL
   zcode-ultra exec "<prompt>"           one-shot headless run (CI/bots)
+  zcode-ultra watch                     watch mode: "// AI: do X" comments invoke the agent
+  zcode-ultra resume [id]               resume the latest (or given) session in the REPL
   zcode-ultra bot discord               start Discord bot (slash + streaming)
   zcode-ultra bot whatsapp [--cloud]    start WhatsApp bot (Baileys QR or Cloud API)
   zcode-ultra setup                     guided configuration wizard
   zcode-ultra doctor                    check environment + providers
+  zcode-ultra undo                      git-revert the last agent commit (aider /undo)
   zcode-ultra config get <key> | config set <key> <json> | config list
   zcode-ultra sessions [id]             list sessions / show a transcript
   zcode-ultra memory "note"             append a memory note
@@ -104,7 +112,8 @@ OPTIONS
   -s, --session <id>        resume session
       --max-turns <n>       agent loop safety cap (default 60)
   -t, --timeout <ms>        exec mode hard timeout
-      --json                exec mode: JSON output
+      --json                exec mode: JSON output (includes usage + cost)
+      --no-strip            watch mode: keep trigger comments after runs
   -h, --help                show this help`;
 }
 
@@ -130,6 +139,37 @@ async function main(): Promise<void> {
       const planMode = args.flags.plan === true || cfg.permissionMode === "plan";
       const session = typeof args.flags.session === "string" ? (Session.load(args.flags.session) ?? new Session(workspace, cfg.model)) : new Session(workspace, cfg.model);
       await runRepl({ cfg, workspace, planMode, session });
+      break;
+    }
+    case "resume": {
+      const id = args.positional[1] ?? Session.list()[0]?.id;
+      if (!id) {
+        console.error("No sessions found. Start one with: zcode-ultra");
+        process.exit(1);
+      }
+      const s = Session.load(id);
+      if (!s) {
+        console.error(`Session not found: ${id}`);
+        process.exit(1);
+      }
+      const planMode = args.flags.plan === true || cfg.permissionMode === "plan";
+      console.log(C.dim(`resuming ${s.id} — ${s.meta.title} (${s.history.length} messages)`));
+      await runRepl({ cfg, workspace, planMode, session: s });
+      break;
+    }
+    case "watch": {
+      const { runWatch } = await import("./cli/watch.js");
+      await runWatch({
+        workspace,
+        noStrip: args.flags["no-strip"] === true,
+        triggers: typeof args.flags.triggers === "string" ? args.flags.triggers.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
+      });
+      break;
+    }
+    case "undo": {
+      const r = await undoLastAgentCommit(workspace, cfg.git.commitPrefix || "zcu");
+      console.log(r.ok ? C.green(r.detail) : C.yellow(r.detail));
+      process.exit(r.ok ? 0 : 1);
       break;
     }
     case "exec": {
@@ -191,7 +231,8 @@ async function main(): Promise<void> {
       } else {
         const list = Session.list();
         for (const s of list) {
-          console.log(`${C.cyan(s.id)}  ${s.updatedAt.slice(0, 16).replace("T", " ")}  ${C.dim(`${s.totalTokens} tok`)}  ${s.title}`);
+          const usage = s.usage ?? {};
+          console.log(`${C.cyan(s.id)}  ${s.updatedAt.slice(0, 16).replace("T", " ")}  ${C.dim(`${s.totalTokens} tok`)}  ${C.dim(formatUsageLine(usage, costTable(cfg)))}  ${s.title}`);
         }
         if (list.length === 0) console.log("(no sessions yet)");
       }
@@ -212,6 +253,14 @@ async function main(): Promise<void> {
       if (cmd) console.error(`\nUnknown command: ${cmd}`);
       process.exit(cmd ? 64 : 0);
   }
+}
+
+function costTable(cfg: Config): Record<string, { in: number; out: number }> {
+  const table: Record<string, { in: number; out: number }> = {};
+  for (const [id, p] of Object.entries({ ...BUILTIN_PROVIDERS, ...cfg.providers })) {
+    if (p.cost) table[id] = p.cost;
+  }
+  return table;
 }
 
 async function doctor(cfg: Config, workspace: string): Promise<void> {

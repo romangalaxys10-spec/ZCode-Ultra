@@ -6,9 +6,10 @@
 import path from "node:path";
 import { execFile } from "node:child_process";
 import type { ToolDef, ToolContext, ToolResult } from "./types.js";
-import { str, num } from "./types.js";
+import { str, num, bool } from "./types.js";
 import { bashRisk, checkApproval, sandboxedExec, scrubSecrets } from "../safety/safety.js";
 import { truncate } from "../util.js";
+import { startTaskWithShell } from "./bg-tools.js";
 
 /**
  * Shell selection: POSIX uses /bin/bash. Windows prefers Git Bash (ships
@@ -40,6 +41,12 @@ export const BashTool: ToolDef = {
       command: { type: "string", description: "The shell command to run" },
       timeout_ms: { type: "number", description: "Timeout in milliseconds (default 120000, max 600000)" },
       description: { type: "string", description: "Short description of what this command does" },
+      run_in_background: {
+        type: "boolean",
+        description:
+          "Start the command in the background and return immediately with a task id. " +
+          "Use for dev servers, builds, test watchers. Poll with TaskOutput; stop with TaskStop.",
+      },
     },
     required: ["command"],
   },
@@ -61,6 +68,20 @@ export const BashTool: ToolDef = {
     }
 
     ctx.onProgress?.(`$ ${truncate(command, 120)}`);
+
+    // Background mode: start and return immediately (Claude Code pattern).
+    if (bool(input, "run_in_background", false)) {
+      if (ctx.cfg.sandbox === "docker") {
+        return { output: "Error: run_in_background is not supported with sandbox=docker yet.", isError: true };
+      }
+      const task = await startTaskWithShell(ctx.workspace, command, shellForWindows, timeoutMs);
+      return {
+        output:
+          `Started background task ${task.id}.\n` +
+          `Check its output with TaskOutput(task_id="${task.id}"); stop it with TaskStop. It is killed automatically after ${timeoutMs}ms.`,
+        meta: { taskId: task.id },
+      };
+    }
 
     if (ctx.cfg.sandbox === "docker") {
       const r = await sandboxedExec(ctx.safety, [command], ctx.workspace, timeoutMs);
