@@ -1,0 +1,142 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag (e.g. v1.0.1)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  binaries:
+    name: Standalone binary (${{ matrix.os }} / ${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, arch: arm64, target: aarch64-apple-darwin }
+          - { os: macos-latest, arch: x64, target: x86_64-apple-darwin }
+          - { os: ubuntu-latest, arch: x64, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-latest, arch: arm64, target: aarch64-unknown-linux-gnu }
+          - { os: windows-latest, arch: x64, target: x86_64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Compute asset name
+        id: asset
+        shell: bash
+        run: |
+          case "${{ matrix.os }}" in
+            macos-latest) OS_NAME="darwin" ;;
+            ubuntu-latest) OS_NAME="linux" ;;
+            *) OS_NAME="windows" ;;
+          esac
+          case "${{ matrix.os }}" in
+            windows-latest) EXT=".exe" ;;
+            *) EXT="" ;;
+          esac
+          echo "name=zcode-ultra-${OS_NAME}-${{ matrix.arch }}${EXT}" >> "$GITHUB_OUTPUT"
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Typecheck + build (JS)
+        run: |
+          npm run typecheck
+          npm run build
+      - name: Smoke test
+        run: |
+          node dist/index.js version
+          node scripts/smoke.mjs
+        shell: bash
+      - name: Compile standalone binary (bun)
+        shell: bash
+        run: |
+          bun build ./src/index.ts --compile --minify --target=${{ matrix.target }} --outfile "${{ steps.asset.outputs.name }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ steps.asset.outputs.name }}
+          retention-days: 7
+
+  packages:
+    name: Native packages (deb / rpm)
+    runs-on: ubuntu-latest
+    needs: binaries
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: bin-ubuntu-latest-x64
+          path: ./pkg-asset
+      - name: Stage binary
+        run: |
+          mkdir -p dist
+          ASSET=$(find pkg-asset -name "zcode-ultra-linux-x64*" | head -1)
+          cp "$ASSET" dist/zcode-ultra
+          chmod +x dist/zcode-ultra
+      - name: Install nfpm
+        run: |
+          curl -fsSL -o nfpm.deb https://github.com/goreleaser/nfpm/releases/download/v2.36.1/nfpm_amd64.deb
+          sudo dpkg -i nfpm.deb
+      - name: Build deb + rpm
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          VERSION_NUM="${VERSION#v}"
+          mkdir -p packages
+          nfpm package -f install/nfpm.yaml -p deb -a amd64 -t "packages/zcode-ultra_${VERSION_NUM}_amd64.deb"
+          nfpm package -f install/nfpm.yaml -p rpm -a x86_64 -t "packages/zcode-ultra-${VERSION_NUM}.x86_64.rpm"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-packages
+          path: packages/*
+          retention-days: 7
+
+  npm:
+    name: Publish npm package
+    runs-on: ubuntu-latest
+    needs: binaries
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - run: npm install --no-audit --no-fund
+      - run: npm run build
+      - name: Publish (if NPM_TOKEN configured)
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        continue-on-error: true
+
+  github-release:
+    name: Attach artifacts to GitHub Release
+    runs-on: ubuntu-latest
+    needs: [binaries, packages]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Flatten artifacts
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name "zcode-ultra-*" -o -name "*.deb" -o -name "*.rpm" \) -exec cp {} release/ \;
+          chmod +x release/zcode-ultra-* 2>/dev/null || true
+          ls -la release/
+      - name: Create/Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ZCode Ultra ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

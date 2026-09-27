@@ -1,0 +1,27 @@
+# Winget manifest — publish via microsoft/winget-pkgs PR (manifests/z/ZCodeUltra/ZCodeUltra/1.0.0/)
+# winget install ZCodeUltra.ZCodeUltra
+PackageIdentifier: ZCodeUltra.ZCodeUltra
+PackageVersion: 1.0.0
+PackageName: ZCode Ultra
+Publisher: ZCode Ultra Contributors
+License: MIT
+ShortDescription: Lean, multi-provider, bot-native coding agent harness (CLI + Discord + WhatsApp)
+PackageUrl: https://github.com/romangalaxys10-spec/ZCode-Ultra
+Moniker: zcode-ultra
+Tags:
+  - ai
+  - agent
+  - cli
+  - llm
+  - discord
+  - whatsapp
+Installers:
+  - Architecture: x64
+    InstallerType: portable
+    InstallerUrl: https://github.com/romangalaxys10-spec/ZCode-Ultra/releases/download/v1.0.0/zcode-ultra-windows-x64.exe
+    InstallerSha256: <SET-AT-RELEASE>
+    Commands:
+      - zcode-ultra
+      - zu
+ManifestType: singleton
+ManifestVersion: 1.6.0

@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Build + smoke + e2e (node ${{ matrix.node }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ["20", "22", "24"]
+        exclude:
+          - os: macos-latest
+            node: "20"
+          - os: windows-latest
+            node: "20"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+      - name: CLI smoke (help/version/doctor)
+        run: |
+          node dist/index.js --help
+          node dist/index.js version
+          node dist/index.js doctor
+        shell: bash
+      - name: Tool + safety smoke tests
+        run: node scripts/smoke.mjs
+        shell: bash
+      - name: End-to-end agent loop (mock provider)
+        run: node scripts/e2e-mock.mjs
+        shell: bash

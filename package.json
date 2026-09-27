@@ -1,0 +1,54 @@
+{
+  "name": "zcode-ultra",
+  "version": "1.0.0",
+  "description": "ZCode Ultra — a lean, multi-provider, bot-native coding agent harness. CLI + Discord + WhatsApp. Standalone binaries for macOS, Windows and Linux.",
+  "type": "module",
+  "license": "MIT",
+  "author": "ZCode Ultra Contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/romangalaxys10-spec/ZCode-Ultra.git"
+  },
+  "homepage": "https://github.com/romangalaxys10-spec/ZCode-Ultra#readme",
+  "bugs": "https://github.com/romangalaxys10-spec/ZCode-Ultra/issues",
+  "keywords": [
+    "ai", "agent", "coding-agent", "cli", "harness", "llm",
+    "glm", "deepseek", "openai", "anthropic", "ollama",
+    "discord-bot", "whatsapp-bot", "mcp", "subagents", "tools"
+  ],
+  "engines": {
+    "node": ">=20.10.0"
+  },
+  "bin": {
+    "zcode-ultra": "dist/index.js",
+    "zu": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "NOTICE.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "smoke": "node dist/index.js --help",
+    "test": "node scripts/smoke.mjs",
+    "e2e": "node scripts/e2e-mock.mjs"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3"
+  },
+  "optionalDependencies": {
+    "@whiskeysockets/baileys": "^6.7.9",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "@types/node": "^22.10.0"
+  }
+}

@@ -1,0 +1,24 @@
+# nfpm configuration for .deb / .rpm / apk packages
+# Build: nfpm package -f install/nfpm.yaml -p deb -t dist/zcode-ultra_1.0.0_amd64.deb
+name: zcode-ultra
+arch: ${ARCH}
+version: ${VERSION}
+section: utils
+priority: optional
+maintainer: "ZCode Ultra Contributors <noreply@github.com>"
+description: |
+  ZCode Ultra — a lean, multi-provider, bot-native coding agent harness.
+  Terminal agent with tools, subagents, memory, MCP and sandboxed execution,
+  plus Discord and WhatsApp bots. Works with GLM, DeepSeek, OpenAI,
+  Anthropic, Ollama and any OpenAI-compatible endpoint.
+homepage: https://github.com/romangalaxys10-spec/ZCode-Ultra
+license: MIT
+contents:
+  - src: dist/zcode-ultra
+    dst: /usr/bin/zcode-ultra
+  - src: README.md
+    dst: /usr/share/doc/zcode-ultra/README.md
+  - src: LICENSE
+    dst: /usr/share/doc/zcode-ultra/LICENSE
+depends:
+  - nodejs >= 20
