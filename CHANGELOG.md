@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.0.0 — initial release
+## v1.0.1 — initial release
 
 ### Core
 - Agent loop with parallel tool execution (bounded pool), max-turns runaway protection

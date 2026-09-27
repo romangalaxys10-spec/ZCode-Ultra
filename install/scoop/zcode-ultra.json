@@ -2,7 +2,7 @@
 # Install: scoop bucket add zcu https://github.com/romangalaxys10-spec/scoop-zcode-ultra && scoop install zcode-ultra
 {
   "$schema": "https://raw.githubusercontent.com/ScoopInstaller/Scoop/master/schema.json",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "ZCode Ultra — lean, multi-provider, bot-native coding agent harness (CLI + Discord + WhatsApp).",
   "homepage": "https://github.com/romangalaxys10-spec/ZCode-Ultra",
   "license": "MIT",
@@ -11,7 +11,7 @@
     "Run 'zcode-ultra doctor' to verify your environment."
   ],
   "depends": "nodejs-lts",
-  "url": "https://github.com/romangalaxys10-spec/ZCode-Ultra/releases/download/v1.0.0/zcode-ultra-windows-x64.exe",
+  "url": "https://github.com/romangalaxys10-spec/ZCode-Ultra/releases/download/v1.0.1/zcode-ultra-windows-x64.exe",
   "hash": "",
   "bin": "zcode-ultra-windows-x64.exe",
   "pre_install": "if (Test-Path \"$dir\\zcode-ultra-windows-x64.exe\") { Move-Item \"$dir\\zcode-ultra-windows-x64.exe\" \"$dir\\zcode-ultra.exe\" }",

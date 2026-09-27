@@ -18,7 +18,7 @@ Tags:
 Installers:
   - Architecture: x64
     InstallerType: portable
-    InstallerUrl: https://github.com/romangalaxys10-spec/ZCode-Ultra/releases/download/v1.0.0/zcode-ultra-windows-x64.exe
+    InstallerUrl: https://github.com/romangalaxys10-spec/ZCode-Ultra/releases/download/v1.0.1/zcode-ultra-windows-x64.exe
     InstallerSha256: <SET-AT-RELEASE>
     Commands:
       - zcode-ultra
