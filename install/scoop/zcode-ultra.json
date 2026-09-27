@@ -11,7 +11,7 @@
     "Run 'zcode-ultra doctor' to verify your environment."
   ],
   "depends": "nodejs-lts",
-  "url": "https://github.com/romangalaxys10-spec/ZCode-Ultra/releases/download/v1.0.1/zcode-ultra-windows-x64.exe",
+  "url": "https://github.com/romangalaxys10-spec/ZCode-Ultra/releases/download/v1.0.2/zcode-ultra-windows-x64.exe",
   "hash": "",
   "bin": "zcode-ultra-windows-x64.exe",
   "pre_install": "if (Test-Path \"$dir\\zcode-ultra-windows-x64.exe\") { Move-Item \"$dir\\zcode-ultra-windows-x64.exe\" \"$dir\\zcode-ultra.exe\" }",

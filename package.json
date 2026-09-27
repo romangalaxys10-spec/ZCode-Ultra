@@ -1,6 +1,6 @@
 {
   "name": "zcode-ultra",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "ZCode Ultra — a lean, multi-provider, bot-native coding agent harness. CLI + Discord + WhatsApp. Standalone binaries for macOS, Windows and Linux.",
   "type": "module",
   "license": "MIT",

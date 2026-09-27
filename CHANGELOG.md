@@ -1,6 +1,8 @@
 # Changelog
 
-## v1.0.1 — initial release
+## v1.0.2 — initial release
+
+- Fixed: native package build (dpkg-deb + alien), explicit npm publish guard
 
 ### Core
 - Agent loop with parallel tool execution (bounded pool), max-turns runaway protection
