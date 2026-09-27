@@ -159,15 +159,20 @@ check("cost estimate", Math.abs(cost - (0.6 + 0.22)) < 1e-9, String(cost));
 check("formatUsageLine", formatUsageLine(usageMap, { zai: { in: 0.6, out: 2.2 } }).includes("1 request"));
 
 // --- background tasks (Claude Code pattern) ---
+// Use script files (no inline quotes) so the test is portable across
+// bash and cmd.exe shells.
+const bgScript = path.join(WS, "bg-echo.js");
+fs.writeFileSync(bgScript, "console.log('bg-smoke-77');\n");
+const sleepScript = path.join(WS, "bg-sleep.js");
+fs.writeFileSync(sleepScript, "setTimeout(() => {}, 60000);\n");
 const bgShell = process.platform === "win32"
   ? { file: process.env.ComSpec ?? "cmd.exe", args: ["/d", "/s", "/c"] }
   : { file: "/bin/bash", args: ["-c"] };
-const bgCmd = "node -e \"console.log('bg-smoke-77')\"";
-const bgTask = startTask(WS, bgCmd, bgShell.file, bgShell.args, 30_000);
-await new Promise((r) => setTimeout(r, 2500));
+const bgTask = startTask(WS, `node bg-echo.js`, bgShell.file, bgShell.args, 30_000);
+await new Promise((r) => setTimeout(r, 3000));
 const bgDone = getTask(bgTask.id);
 check("background task runs", bgDone && bgDone.status === "completed" && bgDone.stdout.includes("bg-smoke-77"), JSON.stringify({ status: bgDone?.status, out: bgDone?.stdout, err: bgDone?.stderr }));
-const bgLong = startTask(WS, "node -e \"setTimeout(()=>{},60000)\"", bgShell.file, bgShell.args, 30_000);
+const bgLong = startTask(WS, `node bg-sleep.js`, bgShell.file, bgShell.args, 30_000);
 check("background task registered", getTask(bgLong.id)?.status === "running");
 stopAllTasks();
 check("stopAllTasks kills", getTask(bgLong.id)?.status !== "running");

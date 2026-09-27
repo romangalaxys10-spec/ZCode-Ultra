@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.1.1 — CI fix
+
+- fix(ci): background-task smoke test now uses script files instead of inline `node -e "…"` — cmd.exe (Windows Git-Bash-less runners) mangles nested quotes, which made the Windows smoke step fail and skipped npm/deb/rpm/release-attach downstream. No runtime changes.
+
 ## v1.1.0 — best-of-breed release
 
 Feature release informed by a fresh survey of the top-rated open harnesses on GitHub (opencode ~210k★, Claude Code ~148k★, Codex CLI ~127k★, Gemini CLI ~107k★, OpenHands ~89k★, Cline ~69k★, Goose ~55k★, Aider ~49k★, Crush ~28k★, Roo ~24k★, SWE-agent ~20k★ — star counts as of 2026-09-28). Full study: `docs/HARNESS-RESEARCH.md`; upstream comparison: `docs/COMPARISON.md`.

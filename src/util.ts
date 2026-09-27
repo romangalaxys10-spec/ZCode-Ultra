@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 
-export const VERSION = "1.1.0";
+export const VERSION = "1.1.1";
 
 export function newId(prefix = ""): string {
   const id = randomUUID();
